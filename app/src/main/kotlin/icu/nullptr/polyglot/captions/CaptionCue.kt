@@ -1,6 +1,7 @@
 package icu.nullptr.polyglot.captions
 
 import icu.nullptr.polyglot.module
+import icu.nullptr.polyglot.moduleInitialized
 
 data class CaptionCue(
     val videoId: String,
@@ -27,7 +28,7 @@ data class CaptionCue(
          * annotations wrapped in square brackets.
          */
         fun clean(text: String): String =
-            if (module.config.removeSdhTags) {
+            if (moduleInitialized && module.config.removeSdhTags) {
                 normalize(CaptionTextCleaner.stripSdhTags(text))
             } else {
                 normalize(text)

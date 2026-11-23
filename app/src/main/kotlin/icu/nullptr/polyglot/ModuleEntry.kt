@@ -24,6 +24,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 lateinit var module: ModuleEntry
 
+/** True once [module] is assigned, so pure-JVM unit tests can call normalizers. */
+val moduleInitialized: Boolean
+    get() = ::module.isInitialized
+
 private const val TARGET_PACKAGE = "com.google.android.youtube"
 private const val TAG = "ModuleEntry"
 

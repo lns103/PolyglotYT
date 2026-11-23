@@ -8,6 +8,7 @@ import android.view.View
 import icu.nullptr.polyglot.captions.BilingualFormatter
 import icu.nullptr.polyglot.captions.CaptionCue
 import icu.nullptr.polyglot.captions.CaptionLanguageState
+import icu.nullptr.polyglot.captions.CaptionLineMatcher
 import icu.nullptr.polyglot.captions.CaptionSession
 import icu.nullptr.polyglot.module
 import icu.nullptr.polyglot.translate.TranslationManager
@@ -123,12 +124,20 @@ object CaptionHook : BaseHook {
                 }
 
                 session.translatedCueContaining(normalizedOriginal)?.let { translation ->
-                    val replacement = replacementForTranslatedCue(
-                        cueText = translation.original,
-                        renderedFragment = normalizedOriginal,
-                        translated = translation.translated,
-                    )
-                    return@hook chain.proceed(arrayOf(replacement))
+                    val cue = CaptionCue.clean(translation.original)
+                    val position = CaptionLineMatcher.lineStart(cue, normalizedOriginal)
+                    if (position != null && position + normalizedOriginal.length == cue.length) {
+                        // Last line: render the merged bilingual block here so the
+                        // block stays aligned with the bottom of the caption.
+                        val replacement = BilingualFormatter.format(cue, translation.translated)
+                        return@hook chain.proceed(arrayOf(replacement))
+                    }
+                    if (position != null) {
+                        // Earlier line of a multi-line cue: hide it immediately.
+                        // Waiting for the last line view to appear kept the head
+                        // line visible until the next full re-render.
+                        return@hook chain.proceed(arrayOf(""))
+                    }
                 }
 
                 val formatted = formatCaption(original)
@@ -244,6 +253,7 @@ object CaptionHook : BaseHook {
         val cues = list.mapNotNull { item ->
             item?.toCaptionCue()
         }
+        session.updateActiveCues(cues)
         return session.observeNewCues(cues)
     }
 
@@ -373,58 +383,87 @@ object CaptionHook : BaseHook {
         }
     }
 
-    private fun replacementForTranslatedCue(
-        cueText: String,
-        renderedFragment: String,
-        translated: String,
-    ): CharSequence {
-        val normalizedCue = CaptionCue.clean(cueText)
-        val normalizedFragment = CaptionCue.clean(renderedFragment)
-        if (normalizedCue.isEmpty() || normalizedFragment.isEmpty()) return renderedFragment
-
-        val shouldDisplayBlock = normalizedCue == normalizedFragment ||
-                normalizedCue.endsWith(normalizedFragment)
-        return if (shouldDisplayBlock) {
-            BilingualFormatter.format(normalizedCue, translated)
-        } else {
-            ""
-        }
-    }
-
     private fun refreshVisibleRenderers(original: String, source: String) {
         val normalized = CaptionCue.clean(original)
         if (normalized.isEmpty()) return
 
         mainHandler.post {
-            val now = System.currentTimeMillis()
-            val snapshot = synchronized(rendererStates) {
-                rendererStates.entries
-                    .filter { (_, state) -> now - state.updatedAtMs <= RENDERER_STATE_TTL_MS }
-                    .map { (renderer, state) -> renderer to state }
+            applyCueTranslation(normalized, source)
+        }
+    }
+
+    /**
+     * Merges the views of a multi-line cue into one bilingual block.
+     *
+     * Every renderer view whose text is a whole-word line of [normalized] is
+     * collected from the full renderer history (no time window: the first line
+     * is often rendered seconds before its translation arrives). The block is
+     * written into the bottom-most line view and the other line views are
+     * cleared, which merges the original lines without raising the caption.
+     */
+    private fun applyCueTranslation(normalized: String, source: String) {
+        val formatted = formatCaption(normalized)
+        if (formatted.toString() == normalized) return
+
+        val now = System.currentTimeMillis()
+        val snapshot = synchronized(rendererStates) {
+            rendererStates.entries.map { (renderer, state) -> renderer to state }
+        }
+        if (snapshot.isEmpty()) return
+
+        val candidates = ArrayList<CueLineCandidate>()
+        for ((renderer, state) in snapshot) {
+            val text = state.normalizedText
+            if (text.isEmpty()) continue
+            val position = if (text == normalized) {
+                normalized.length
+            } else {
+                CaptionLineMatcher.lineStart(normalized, text) ?: continue
             }
+            candidates += CueLineCandidate(renderer, state, position)
+        }
+        if (candidates.isEmpty()) return
 
-            val formatted = formatCaption(normalized)
-            if (formatted.toString() == normalized) return@post
+        // The bottom-most line becomes the anchor; the newest view wins on ties.
+        val anchor = candidates.maxWithOrNull(
+            compareBy<CueLineCandidate> { it.position }
+                .thenBy { it.state.updatedAtMs },
+        ) ?: return
 
-            val exactTargets = snapshot.filter { (_, state) -> state.normalizedText == normalized }
-            if (exactTargets.isNotEmpty()) {
-                for ((renderer, state) in exactTargets) {
-                    invokeRenderer(renderer, state.method, formatted, source, normalized.length)
-                }
-                return@post
-            }
+        for (candidate in candidates) {
+            if (candidate.renderer === anchor.renderer) continue
+            clearRenderer(candidate.renderer, candidate.state, source, normalized.length)
+        }
 
-            val coveredTargets = snapshot
-                .filter { (_, state) -> state.normalizedText.isNotEmpty() && normalized.contains(state.normalizedText) }
-                .sortedBy { (_, state) -> state.sequence }
-            if (coveredTargets.isEmpty()) return@post
+        logV(
+            name,
+            "Merged caption lines from $source, views=${candidates.size}, " +
+                "anchor=${anchor.position}, length=${normalized.length}",
+        )
+        invokeRenderer(anchor.renderer, anchor.state.method, formatted, source, normalized.length)
+        markRendered(anchor.renderer, anchor.state.method, normalized, now)
+    }
 
-            for ((renderer, state) in coveredTargets.dropLast(1)) {
-                invokeRenderer(renderer, state.method, "", source, normalized.length)
-            }
+    private fun clearRenderer(
+        renderer: Any,
+        state: RendererState,
+        source: String,
+        originalLength: Int,
+    ) {
+        invokeRenderer(renderer, state.method, "", source, originalLength)
+        synchronized(rendererStates) {
+            rendererStates.remove(renderer)
+        }
+    }
 
-            val anchor = coveredTargets.last()
-            invokeRenderer(anchor.first, anchor.second.method, formatted, source, normalized.length)
+    private fun markRendered(renderer: Any, method: Method, text: String, now: Long) {
+        synchronized(rendererStates) {
+            rendererStates[renderer] = RendererState(
+                method = method,
+                normalizedText = text,
+                sequence = rendererSequence.incrementAndGet(),
+                updatedAtMs = now,
+            )
         }
     }
 
@@ -540,12 +579,17 @@ object CaptionHook : BaseHook {
     private const val MENU_ITEM_CAPTIONS_KEY = "menu_item_captions"
     private const val EDITABLE_TYPE = "android.text.Editable"
     private const val SPARSE_ARRAY_TYPE = "android.util.SparseArray"
-    private const val RENDERER_STATE_TTL_MS = 2_000L
 
     private data class RendererState(
         val method: Method,
         val normalizedText: String,
         val sequence: Long,
         val updatedAtMs: Long,
+    )
+
+    private data class CueLineCandidate(
+        val renderer: Any,
+        val state: RendererState,
+        val position: Int,
     )
 }
