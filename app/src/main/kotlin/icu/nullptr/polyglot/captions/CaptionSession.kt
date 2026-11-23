@@ -27,44 +27,32 @@ class CaptionSession {
     /**
      * Resolves the cue a rendered line belongs to.
      *
-     * Auto-generated captions are rolling and multi-line captions are rendered
-     * line by line, so a rendered fragment can be the head, the tail or a
-     * middle line of a cue. Outside the current caption window only trailing
-     * fragments are accepted; inside the window any whole-line fragment is.
-     * Iterating a ConcurrentHashMap has no meaningful order, so candidates are
-     * ranked: cues from the current window first, then the tightest (shortest)
-     * match, then the most recently observed cue. When no safe candidate exists
-     * this returns null so the caller keeps YouTube's original text.
+     * Only cues that are part of the current caption window are considered:
+     * matching against the whole track picked up identical trailing fragments
+     * from other moments in the video. Within the window a rendered fragment may
+     * be the head, the tail or a middle line of a cue. When no window is known
+     * this returns null so the caller keeps YouTube's original text; exact
+     * whole-cue matches are handled separately by the caller.
      */
     fun translatedCueContaining(fragment: String?): CaptionTranslation? {
         val normalized = normalize(fragment.orEmpty())
         if (normalized.isEmpty()) return null
 
         val active = activeCueTexts
+        if (active.isEmpty()) return null
+        val activeTexts = active.toHashSet()
+
         val candidates = ArrayList<Candidate>()
         for (observed in observedCues.values) {
             val cueText = observed.cue.normalizedText()
-            if (cueText == normalized) continue
+            if (cueText == normalized || cueText !in activeTexts) continue
             if (!translations.containsKey(cueText)) continue
-
-            val rank = activeRank(cueText, active)
-            val position = CaptionLineMatcher.lineStart(cueText, normalized)
-            val matches = when {
-                position == null -> false
-                // A trailing fragment is always safe to match.
-                cueText.endsWith(normalized) -> true
-                // The head line of a multi-line cue is rendered as a prefix.
-                position == 0 -> normalized.length >= MIN_PREFIX_FRAGMENT_LENGTH ||
-                    rank != Int.MAX_VALUE
-                // Middle fragments are only trusted inside the current window.
-                else -> rank != Int.MAX_VALUE
-            }
-            if (!matches) continue
+            if (!CaptionLineMatcher.isLineOf(cueText, normalized)) continue
 
             candidates += Candidate(
                 text = cueText,
                 sequence = observed.sequence,
-                activeRank = rank,
+                activeRank = activeRank(cueText, active),
             )
         }
         if (candidates.isEmpty()) return null
@@ -158,7 +146,6 @@ class CaptionSession {
     private companion object {
         const val RENDERED_TEXT_LOG_INTERVAL_MS = 30_000L
         const val MAX_ACTIVE_CUES = 8
-        const val MIN_PREFIX_FRAGMENT_LENGTH = 8
 
         val CANDIDATE_ORDER: Comparator<Candidate> =
             compareBy<Candidate> { it.activeRank }

@@ -6,103 +6,83 @@ import org.junit.Test
 
 class CaptionSessionTest {
     @Test
-    fun ignoresCueThatOnlyContainsFragment() {
+    fun requiresTheActiveWindow() {
         val session = CaptionSession()
         session.observeCue(cue("we should go now", startMs = 1_000))
         session.putTranslation("we should go now", "我们该走了")
 
-        // "should go" is contained but is not the rendered tail of the cue.
-        assertNull(session.translatedCueContaining("should go"))
+        // Without a known window the caller must keep YouTube's own text.
+        assertNull(session.translatedCueContaining("go now"))
     }
 
     @Test
-    fun resolvesRenderedTailFragment() {
-        val session = CaptionSession()
-        session.observeCue(cue("we should go now", startMs = 1_000))
-        session.putTranslation("we should go now", "我们该走了")
-
-        val resolved = session.translatedCueContaining("go now")
-
-        assertEquals("we should go now", resolved?.original)
-        assertEquals("我们该走了", resolved?.translated)
-    }
-
-    @Test
-    fun resolvesHeadFragmentWithoutWindow() {
+    fun resolvesLinesInsideTheWindow() {
         val session = CaptionSession()
         val full = cue("we should go now", startMs = 1_000)
         session.observeCue(full)
         session.putTranslation(full.text, "我们该走了")
-
-        // The head line of a multi-line cue is rendered as a prefix.
-        assertEquals(full.text, session.translatedCueContaining("we should")?.original)
-    }
-
-    @Test
-    fun ignoresShortHeadFragmentWithoutWindow() {
-        val session = CaptionSession()
-        val full = cue("we should go now", startMs = 1_000)
-        session.observeCue(full)
-        session.putTranslation(full.text, "我们该走了")
-
-        assertNull(session.translatedCueContaining("we"))
-
         session.updateActiveCues(listOf(full))
-        assertEquals(full.text, session.translatedCueContaining("we")?.original)
+
+        assertEquals(full.text, session.translatedCueContaining("go now")?.original)
+        assertEquals(full.text, session.translatedCueContaining("we should")?.original)
+        assertEquals(full.text, session.translatedCueContaining("should go")?.original)
     }
 
     @Test
-    fun prefersTheTightestSuffixMatch() {
+    fun ignoresFragmentsOutsideTheWindow() {
         val session = CaptionSession()
-        session.observeCue(cue("and then we should go now", startMs = 1_000))
-        session.observeCue(cue("we should go now", startMs = 2_000))
-        session.putTranslation("and then we should go now", "然后我们应该现在走")
-        session.putTranslation("we should go now", "我们应该现在走")
+        val current = cue("tell me what you know", startMs = 2_000)
+        val other = cue("I don't know", startMs = 90_000)
+        session.observeCue(current)
+        session.observeCue(other)
+        session.putTranslation(current.text, "告诉我你知道什么")
+        session.putTranslation(other.text, "我不知道")
 
-        assertEquals("we should go now", session.translatedCueContaining("go now")?.original)
+        session.updateActiveCues(listOf(current))
+
+        // "know" ends both cues; only the one on screen may be used.
+        assertEquals(current.text, session.translatedCueContaining("know")?.original)
+        assertEquals(current.text, session.translatedCueContaining("what you know")?.original)
     }
 
     @Test
-    fun prefersCueFromTheActiveWindow() {
+    fun ignoresPartialWords() {
         val session = CaptionSession()
-        val longer = cue("and then we should go now", startMs = 1_000)
-        val shorter = cue("we should go now", startMs = 2_000)
-        session.observeCue(longer)
-        session.observeCue(shorter)
-        session.putTranslation(longer.text, "然后我们应该现在走")
-        session.putTranslation(shorter.text, "我们应该现在走")
+        val full = cue("we should go now", startMs = 1_000)
+        session.observeCue(full)
+        session.putTranslation(full.text, "我们该走了")
+        session.updateActiveCues(listOf(full))
 
-        session.updateActiveCues(listOf(longer))
-
-        assertEquals(longer.text, session.translatedCueContaining("go now")?.original)
+        assertNull(session.translatedCueContaining("hould g"))
     }
 
     @Test
-    fun prefersMostRecentlyObservedOnEqualLengths() {
+    fun prefersTheNewestCueInTheWindow() {
         val session = CaptionSession()
-        session.observeCue(cue("say again", startMs = 1_000))
-        session.observeCue(cue("go again", startMs = 2_000))
-        session.putTranslation("say again", "再说一次")
-        session.putTranslation("go again", "再说一遍")
+        val previous = cue("and then we should go now", startMs = 1_000)
+        val current = cue("we should go now", startMs = 2_000)
+        session.observeCue(previous)
+        session.observeCue(current)
+        session.putTranslation(previous.text, "然后我们应该现在走")
+        session.putTranslation(current.text, "我们应该现在走")
 
-        assertEquals("go again", session.translatedCueContaining("again")?.original)
+        session.updateActiveCues(listOf(previous, current))
+
+        assertEquals(current.text, session.translatedCueContaining("go now")?.original)
     }
 
     @Test
     fun ignoresOversizedActiveWindow() {
         val session = CaptionSession()
-        val longer = cue("and then we should go now", startMs = 1_000)
-        val shorter = cue("we should go now", startMs = 2_000)
-        session.observeCue(longer)
-        session.observeCue(shorter)
-        session.putTranslation(longer.text, "然后我们应该现在走")
-        session.putTranslation(shorter.text, "我们应该现在走")
+        val full = cue("we should go now", startMs = 1_000)
+        session.observeCue(full)
+        session.putTranslation(full.text, "我们该走了")
 
-        val oversized = (1..9).map { cue("filler $it go now", startMs = 10_000L + it) }
-        session.updateActiveCues(oversized + longer)
+        val oversized = (1..9).map { cue("filler $it", startMs = 10_000L + it) }
+        session.updateActiveCues(oversized)
 
-        // The oversized list is not a window, so the tightest match wins.
-        assertEquals(shorter.text, session.translatedCueContaining("go now")?.original)
+        // A whole-track list is not a caption window.
+        assertNull(session.translatedCueContaining("go now"))
     }
 
     private fun cue(text: String, startMs: Long): CaptionCue =
