@@ -71,7 +71,7 @@ class CaptionSession {
     fun observedCueCount(): Int = observedCueCounter.get()
 
     private fun normalize(text: String): String =
-        CaptionCue.normalize(text)
+        CaptionCue.clean(text)
 
     private companion object {
         const val RENDERED_TEXT_LOG_INTERVAL_MS = 30_000L

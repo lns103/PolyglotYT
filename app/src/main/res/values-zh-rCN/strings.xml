@@ -35,6 +35,9 @@
     <string name="thinking_summary_toggle_effort">%1$s · %2$s · reasoning_effort=%3$s</string>
     <string name="thinking_summary_disabled_ignores_effort">%1$s · %2$s · 已忽略强度</string>
     <string name="batch_translation">批量翻译</string>
+    <string name="batch_translation_count">每批条数</string>
+    <string name="batch_translation_count_summary">每次请求最多 %1$d 条字幕</string>
+    <string name="remove_sdh_tags">剔除 SDH 标记</string>
     <string name="include_video_title">附带视频标题</string>
     <string name="microsoft_api_key">Azure 降级备用 API Key（可不填）</string>
     <string name="microsoft_endpoint">Azure 降级备用 API 端点</string>

@@ -5,10 +5,13 @@ import icu.nullptr.polyglot.module
 
 object BilingualFormatter {
     fun format(original: CharSequence?, translated: String?): CharSequence {
-        val originalText = CaptionCue.normalize(original?.toString().orEmpty())
+        val originalText = CaptionCue.clean(original?.toString().orEmpty())
         val translatedText = CaptionCue.normalize(translated.orEmpty())
+        if (originalText.isBlank()) {
+            return ""
+        }
         if (translatedText.isBlank() || translatedText == originalText) {
-            return original ?: ""
+            return originalText
         }
         return when (module.config.subtitleMode) {
             ConfigManager.SUBTITLE_ORIGINAL_FIRST -> "$originalText\n$translatedText"

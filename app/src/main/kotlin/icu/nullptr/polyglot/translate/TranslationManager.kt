@@ -1,6 +1,7 @@
 package icu.nullptr.polyglot.translate
 
 import icu.nullptr.polyglot.captions.CaptionCue
+import icu.nullptr.polyglot.core.ConfigManager
 import icu.nullptr.polyglot.module
 import icu.nullptr.polyglot.translate.providers.MicrosoftTranslator
 import icu.nullptr.polyglot.translate.providers.openai.OpenAICompatibleTranslator
@@ -22,7 +23,6 @@ object TranslationManager {
     const val MIN_TIMEOUT_MS = 5_000
     const val BASE_RETRY_DELAY_MS = 750L
 
-    private const val BATCH_MAX_ITEMS = 8
     private const val BATCH_MAX_CHARS = 1_600
     private const val BATCH_DEBOUNCE_MS = 300L
     private const val BATCH_TIMEOUT_CAP_MS = 30_000
@@ -62,7 +62,7 @@ object TranslationManager {
         sourceLanguage: String,
         onTranslated: (original: String, translated: String) -> Unit,
     ): Boolean {
-        val original = CaptionCue.normalize(text)
+        val original = CaptionCue.clean(text)
         if (original.isEmpty()) return false
 
         if (!module.config.batchTranslationEnabled || !supportsBatch()) {
@@ -95,7 +95,8 @@ object TranslationManager {
             )
 
             val pendingChars = pending.sumOf { it.text.length }
-            flushNow = pending.size >= BATCH_MAX_ITEMS || pendingChars >= BATCH_MAX_CHARS
+            val maxItems = batchMaxItems()
+            flushNow = pending.size >= maxItems || pendingChars >= BATCH_MAX_CHARS
             if (flushNow) {
                 scheduledFlush?.cancel(false)
                 scheduledFlush = null
@@ -133,7 +134,7 @@ object TranslationManager {
         sourceLanguage: String,
         onTranslated: (original: String, translated: String) -> Unit,
     ): Boolean {
-        val original = CaptionCue.normalize(text)
+        val original = CaptionCue.clean(text)
         if (original.isEmpty()) {
             return false
         }
@@ -171,7 +172,7 @@ object TranslationManager {
     ): String =
         translate(
             TranslationRequest(
-                texts = listOf(CaptionCue.normalize(text)),
+                texts = listOf(CaptionCue.clean(text)),
                 sourceLanguage = normalizedSourceLanguage(sourceLanguage),
                 targetLanguage = module.config.targetLanguage,
                 context = context,
@@ -193,13 +194,14 @@ object TranslationManager {
     }
 
     private fun takeBatchLocked(): List<PendingCaption> {
-        val batch = ArrayList<PendingCaption>(BATCH_MAX_ITEMS)
+        val maxItems = batchMaxItems()
+        val batch = ArrayList<PendingCaption>(maxItems)
         var chars = 0
         val iterator = pending.iterator()
         while (iterator.hasNext()) {
             val item = iterator.next()
             if (batch.isNotEmpty() &&
-                (batch.size >= BATCH_MAX_ITEMS || chars + item.text.length > BATCH_MAX_CHARS)
+                (batch.size >= maxItems || chars + item.text.length > BATCH_MAX_CHARS)
             ) {
                 break
             }
@@ -372,6 +374,12 @@ object TranslationManager {
 
     private fun batchTimeoutMs(): Int =
         requestTimeoutMs().coerceAtMost(BATCH_TIMEOUT_CAP_MS)
+
+    private fun batchMaxItems(): Int =
+        module.config.batchTranslationMaxItems.coerceIn(
+            ConfigManager.BATCH_MAX_ITEMS_MIN,
+            ConfigManager.BATCH_MAX_ITEMS_MAX,
+        )
 
     private fun retryDelayMs(attempt: Int): Long =
         BASE_RETRY_DELAY_MS * (attempt + 1)

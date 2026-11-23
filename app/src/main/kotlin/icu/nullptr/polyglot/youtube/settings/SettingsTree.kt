@@ -159,6 +159,34 @@ internal object PolyglotSettingsTree {
                     },
                     onChanged = { module.config.batchTranslationEnabled = it },
                 ),
+                TextSettingsNode(
+                    key = "$ENTRY_KEY.openai_batch_count",
+                    title = module.res.getString(R.string.batch_translation_count),
+                    icon = SettingsIcon.BatchCount,
+                    visible = {
+                        module.config.provider == ConfigManager.PROVIDER_OPENAI &&
+                            module.config.batchTranslationEnabled
+                    },
+                    inputType = InputType.TYPE_CLASS_NUMBER,
+                    value = { module.config.batchTranslationMaxItems.toString() },
+                    summary = {
+                        module.res.getString(
+                            R.string.batch_translation_count_summary,
+                            module.config.batchTranslationMaxItems.coerceIn(
+                                ConfigManager.BATCH_MAX_ITEMS_MIN,
+                                ConfigManager.BATCH_MAX_ITEMS_MAX,
+                            ),
+                        )
+                    },
+                    onSubmitted = {
+                        module.config.batchTranslationMaxItems = it.trim().toIntOrNull()
+                            ?.coerceIn(
+                                ConfigManager.BATCH_MAX_ITEMS_MIN,
+                                ConfigManager.BATCH_MAX_ITEMS_MAX,
+                            )
+                            ?: ConfigManager.BATCH_MAX_ITEMS_DEFAULT
+                    },
+                ),
                 SwitchSettingsNode(
                     key = "$ENTRY_KEY.openai_video_title",
                     title = module.res.getString(R.string.include_video_title),
@@ -185,6 +213,14 @@ internal object PolyglotSettingsTree {
                     selectedValue = { module.config.subtitleMode },
                     selectedLabel = { SettingsOptions.subtitleModeLabel(module.config.subtitleMode) },
                     onSelected = { module.config.subtitleMode = it },
+                ),
+                SwitchSettingsNode(
+                    key = "$ENTRY_KEY.remove_sdh_tags",
+                    title = module.res.getString(R.string.remove_sdh_tags),
+                    icon = SettingsIcon.Sdh,
+                    checked = { module.config.removeSdhTags },
+                    summary = { SettingsOptions.enabledSummary(module.config.removeSdhTags) },
+                    onChanged = { module.config.removeSdhTags = it },
                 ),
             ),
         )
@@ -270,6 +306,8 @@ internal enum class SettingsIcon(val drawableRes: Int) {
     ThinkingParameter(R.drawable.outline_tune_24),
     ReasoningEffort(R.drawable.outline_speed_24),
     Batch(R.drawable.outline_layers_24),
+    BatchCount(R.drawable.outline_format_list_numbered_24),
+    Sdh(R.drawable.outline_subtitles_off_24),
     Title(R.drawable.outline_title_24),
     NetworkCheck(R.drawable.outline_network_check_24),
     Language(R.drawable.outline_language_24),

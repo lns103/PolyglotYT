@@ -52,6 +52,13 @@ class ConfigManager(context: Context, directory: File) {
 
     var batchTranslationEnabled: Boolean by Pref("batch_translation_enabled", true)
 
+    var batchTranslationMaxItems: Int by Pref(
+        "batch_translation_max_items",
+        BATCH_MAX_ITEMS_DEFAULT,
+    )
+
+    var removeSdhTags: Boolean by Pref("remove_sdh_tags", true)
+
     var includeVideoTitle: Boolean by Pref("include_video_title", true)
 
     var openAiSystemPrompt: String by Pref(
@@ -148,5 +155,9 @@ class ConfigManager(context: Context, directory: File) {
         const val SUBTITLE_ORIGINAL_FIRST = "original_first"
         const val SUBTITLE_TRANSLATION_FIRST = "translation_first"
         const val SUBTITLE_TRANSLATION_ONLY = "translation_only"
+
+        const val BATCH_MAX_ITEMS_MIN = 1
+        const val BATCH_MAX_ITEMS_MAX = 50
+        const val BATCH_MAX_ITEMS_DEFAULT = 8
     }
 }

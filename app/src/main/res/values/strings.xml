@@ -36,6 +36,9 @@
     <string name="thinking_summary_toggle_effort">%1$s · %2$s · reasoning_effort=%3$s</string>
     <string name="thinking_summary_disabled_ignores_effort">%1$s · %2$s · effort ignored</string>
     <string name="batch_translation">Batch Translation</string>
+    <string name="batch_translation_count">Batch Size</string>
+    <string name="batch_translation_count_summary">Up to %1$d subtitle lines per request</string>
+    <string name="remove_sdh_tags">Remove SDH Tags</string>
     <string name="include_video_title">Include Video Title</string>
     <string name="microsoft_api_key">Azure fallback API Key (optional)</string>
     <string name="microsoft_endpoint">Azure fallback API Endpoint</string>

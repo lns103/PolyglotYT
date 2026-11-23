@@ -114,7 +114,7 @@ object CaptionHook : BaseHook {
 
                 val original = chain.getArg(0) as? CharSequence
                     ?: return@hook chain.proceed()
-                val normalizedOriginal = CaptionCue.normalize(original.toString())
+                val normalizedOriginal = CaptionCue.clean(original.toString())
                 rememberRendererState(thisObject, method, normalizedOriginal)
 
                 if (session.observeRenderedText(original)) {
@@ -224,7 +224,7 @@ object CaptionHook : BaseHook {
         val cues = ArrayList<CaptionCue>(size)
         for (index in 0 until size) {
             val text = texts[index] as? CharSequence ?: continue
-            val normalized = CaptionCue.normalize(text.toString())
+            val normalized = CaptionCue.clean(text.toString())
             if (normalized.isEmpty()) continue
 
             cues.add(
@@ -250,7 +250,7 @@ object CaptionHook : BaseHook {
     private fun Any.toCaptionCue(): CaptionCue? {
         val text = instanceFieldValues()
             .filterIsInstance<CharSequence>()
-            .map { CaptionCue.normalize(it.toString()) }
+            .map { CaptionCue.clean(it.toString()) }
             .filter { it.isNotEmpty() }
             .maxByOrNull { it.length }
             ?: return null
@@ -378,8 +378,8 @@ object CaptionHook : BaseHook {
         renderedFragment: String,
         translated: String,
     ): CharSequence {
-        val normalizedCue = CaptionCue.normalize(cueText)
-        val normalizedFragment = CaptionCue.normalize(renderedFragment)
+        val normalizedCue = CaptionCue.clean(cueText)
+        val normalizedFragment = CaptionCue.clean(renderedFragment)
         if (normalizedCue.isEmpty() || normalizedFragment.isEmpty()) return renderedFragment
 
         val shouldDisplayBlock = normalizedCue == normalizedFragment ||
@@ -392,7 +392,7 @@ object CaptionHook : BaseHook {
     }
 
     private fun refreshVisibleRenderers(original: String, source: String) {
-        val normalized = CaptionCue.normalize(original)
+        val normalized = CaptionCue.clean(original)
         if (normalized.isEmpty()) return
 
         mainHandler.post {
