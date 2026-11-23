@@ -65,6 +65,61 @@ class BatchResponseParserTest {
     }
 
     @Test
+    fun keepsTranslationsWrappedOntoContinuationLines() {
+        val content = "1. First line\nwrapped onto a second line\n2. Second line"
+
+        val parsed = BatchResponseParser.parseBatch(content, 2)
+
+        assertEquals(
+            listOf("First line wrapped onto a second line", "Second line"),
+            parsed.translations,
+        )
+        assertEquals(true, parsed.isValid)
+    }
+
+    @Test
+    fun parsesNumberedLineWithTextOnNextLine() {
+        assertEquals(
+            listOf("第一句", "第二句"),
+            BatchResponseParser.parse("1.\n第一句\n2.\n第二句", 2),
+        )
+    }
+
+    @Test
+    fun joinsArrayValuesIntoTranslationText() {
+        val content = """
+            {"translations":[
+                {"id":1,"text":["第一行","第二行"]},
+                {"id":2,"text":"第二句"}
+            ]}
+        """.trimIndent()
+
+        val parsed = BatchResponseParser.parseBatch(content, 2)
+
+        assertEquals(listOf("第一行 第二行", "第二句"), parsed.translations)
+        assertEquals(true, parsed.isValid)
+    }
+
+    @Test
+    fun parsesNestedArrayEntries() {
+        val parsed = BatchResponseParser.parseBatch(
+            """[["one","line"],["two"]]""",
+            2,
+        )
+
+        assertEquals(listOf("one line", "two"), parsed.translations)
+        assertEquals(true, parsed.isValid)
+    }
+
+    @Test
+    fun invalidatesNumberedBatchWithDuplicateIds() {
+        val parsed = BatchResponseParser.parseBatch("1. 一\n1. 又一", 2)
+
+        assertEquals(false, parsed.isValid)
+        assertEquals(1, parsed.receivedCount)
+    }
+
+    @Test
     fun returnsEmptyListForUnparseableContent() {
         assertEquals(listOf("", ""), BatchResponseParser.parse("no json here", 2))
     }

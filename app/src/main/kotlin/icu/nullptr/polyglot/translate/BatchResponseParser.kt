@@ -17,7 +17,7 @@ import com.google.gson.JsonParser
 object BatchResponseParser {
     private val THINK_BLOCK = Regex("(?is)<think\\b[^>]*>.*?</think\\s*>")
     private val CODE_FENCE = Regex("(?s)```(?:json)?\\s*(.*?)```")
-    private val NUMBERED_LINE = Regex("(?m)^\\s*(\\d{1,3})\\s*[.、):：]\\s*(.+?)\\s*$")
+    private val NUMBERED_LINE_PREFIX = Regex("^(\\d{1,3})\\s*[.、):：]\\s*(.*)$")
     private val TEXT_KEYS = listOf("text", "translation", "content", "translated", "value")
 
     data class ParsedBatch(
@@ -128,6 +128,13 @@ object BatchResponseParser {
             val primitive = element.asJsonPrimitive
             return if (primitive.isString) null to primitive.asString else null
         }
+        if (element.isJsonArray) {
+            // Some models return a line-wrapped translation as an array of lines.
+            val text = element.asJsonArray.mapNotNull { it.asTextOrNull() }
+                .joinToString(" ")
+                .trim()
+            return if (text.isEmpty()) null else null to text
+        }
         if (!element.isJsonObject) return null
 
         val entry = element.asJsonObject
@@ -135,11 +142,23 @@ object BatchResponseParser {
             if (value.isJsonPrimitive) value.asString.toIntOrNull() else null
         }
         val text = TEXT_KEYS.firstNotNullOfOrNull { key ->
-            entry.get(key)?.takeIf { it.isJsonPrimitive }?.asString
+            entry.get(key)?.let { value -> value.asTranslationText() }
         } ?: return null
 
         return id to text
     }
+
+    private fun JsonElement.asTranslationText(): String? = when {
+        isJsonPrimitive -> asString
+        isJsonArray -> asJsonArray.mapNotNull { it.asTextOrNull() }
+            .joinToString(" ")
+            .ifBlank { null }
+
+        else -> null
+    }
+
+    private fun JsonElement.asTextOrNull(): String? =
+        if (isJsonPrimitive) asString else null
 
     private fun nextEmptyIndex(result: List<String>, from: Int): Int {
         for (index in from until result.size) {
@@ -153,25 +172,47 @@ object BatchResponseParser {
 
     private fun parseNumberedLines(content: String, expectedCount: Int): ParsedBatch {
         val result = MutableList(expectedCount) { "" }
-        var found = false
-        var receivedCount = 0
-        for (match in NUMBERED_LINE.findAll(content)) {
-            val id = match.groupValues[1].toIntOrNull() ?: continue
-            if (id !in 1..expectedCount) continue
+        var currentIndex = -1
 
-            val text = sanitize(match.groupValues[2])
-            if (text.isEmpty()) continue
+        for (rawLine in content.lineSequence()) {
+            val line = rawLine.trim()
+            if (line.isEmpty()) {
+                currentIndex = -1
+                continue
+            }
 
-            result[id - 1] = text
-            receivedCount++
-            found = true
+            val match = NUMBERED_LINE_PREFIX.matchEntire(line)
+            if (match != null) {
+                val id = match.groupValues[1].toIntOrNull()
+                currentIndex = if (id != null && id in 1..expectedCount) id - 1 else -1
+                if (currentIndex < 0) continue
+                appendLine(result, currentIndex, sanitize(match.groupValues[2]))
+            } else if (currentIndex >= 0 && !isStructuredLine(line)) {
+                // The model wrapped one translation onto continuation lines,
+                // which is common when the subtitle itself contains line breaks.
+                appendLine(result, currentIndex, sanitize(line))
+            }
         }
+
         return ParsedBatch(
-            translations = if (found) result else emptyTranslations(expectedCount),
-            receivedCount = receivedCount,
+            translations = result,
+            receivedCount = result.count { it.isNotBlank() },
             expectedCount = expectedCount,
         )
     }
+
+    private fun appendLine(result: MutableList<String>, index: Int, text: String) {
+        if (text.isEmpty()) return
+        val existing = result[index]
+        result[index] = if (existing.isEmpty()) text else "$existing $text"
+    }
+
+    private fun isStructuredLine(line: String): Boolean =
+        line.startsWith("{") ||
+            line.startsWith("}") ||
+            line.startsWith("[") ||
+            line.startsWith("]") ||
+            line.startsWith("```")
 
     private fun emptyTranslations(count: Int): List<String> = MutableList(count) { "" }
 }
